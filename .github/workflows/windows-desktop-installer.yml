@@ -1,0 +1,55 @@
+name: Build Windows desktop installer (unsigned)
+
+# Self-contained Windows build for this fork, without upstream release secrets.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/windows-desktop-installer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Windows x64 NSIS installer
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Install Bun and project dependencies
+        uses: ./.github/actions/setup-bun
+
+      - name: Build Electron desktop application
+        working-directory: packages/desktop
+        run: bun run build
+        env:
+          OPENCODE_CHANNEL: dev
+          OPENCODE_TARGET: windows-x64
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Build unsigned NSIS installer
+        working-directory: packages/desktop
+        run: bunx electron-builder --win nsis --x64 --publish never --config electron-builder.config.ts
+        env:
+          OPENCODE_CHANNEL: dev
+          OPENCODE_TARGET: windows-x64
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify output and SHA256
+        shell: pwsh
+        run: |
+          $installer = "packages/desktop/dist/opencode-desktop-win-x64.exe"
+          if (!(Test-Path $installer)) { throw "Missing installer: $installer" }
+          if ((Get-Item $installer).Length -eq 0) { throw "Installer is empty" }
+          Get-FileHash $installer -Algorithm SHA256 | Format-List
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-desktop-win-x64-unsigned
+          path: packages/desktop/dist/opencode-desktop-win-x64.exe
+          if-no-files-found: error
+          retention-days: 14
